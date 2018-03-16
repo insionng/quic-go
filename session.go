@@ -851,6 +851,21 @@ sendLoop:
 			// There will only be a new ACK after receiving new packets.
 			// SendAck is only returned when we're congestion limited, so we don't need to set the pacingt timer.
 			return s.maybeSendAckOnlyPacket()
+		case ackhandler.SendRTO:
+			// try to send a retransmission first
+			sentPacket, err := s.maybeSendRetransmission()
+			if err != nil {
+				return err
+			}
+			if !sentPacket {
+				// In RTO mode, a probe packet has to be sent.
+				// Add a PING frame to make sure a (retransmittable) packet will be sent.
+				s.queueControlFrame(&wire.PingFrame{})
+				if _, err := s.sendPacket(); err != nil {
+					return err
+				}
+			}
+			numPacketsSent++
 		case ackhandler.SendRetransmission:
 			sentPacket, err := s.maybeSendRetransmission()
 			if err != nil {
