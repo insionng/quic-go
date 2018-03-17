@@ -97,6 +97,11 @@ var _ = Describe("SentPacketHandler", func() {
 		}
 	}
 
+	updateRTT := func(rtt time.Duration) {
+		handler.rttStats.UpdateRTT(rtt, 0, time.Now())
+		ExpectWithOffset(1, handler.rttStats.SmoothedRTT()).To(Equal(rtt))
+	}
+
 	It("determines the packet number length", func() {
 		handler.largestAcked = 0x1337
 		Expect(handler.GetPacketNumberLen(0x1338)).To(Equal(protocol.PacketNumberLen2))
@@ -224,7 +229,7 @@ var _ = Describe("SentPacketHandler", func() {
 				handler.SentPacket(retransmittablePacket(&Packet{PacketNumber: i}))
 			}
 			// Increase RTT, because the tests would be flaky otherwise
-			handler.rttStats.UpdateRTT(time.Hour, 0, time.Now())
+			updateRTT(time.Hour)
 			Expect(handler.bytesInFlight).To(Equal(protocol.ByteCount(10)))
 		})
 
@@ -500,7 +505,7 @@ var _ = Describe("SentPacketHandler", func() {
 		})
 	})
 
-	Context("congestion", func() {
+	PContext("congestion", func() {
 		var cong *mocks.MockSendAlgorithm
 
 		BeforeEach(func() {
@@ -699,27 +704,47 @@ var _ = Describe("SentPacketHandler", func() {
 		})
 	})
 
-	Context("RTOs", func() {
+	Context("TLPs", func() {
+		It("uses the default RTT", func() {
+			Expect(handler.computeTLPTimeout()).To(Equal(defaultInitialRTT * 3 / 2))
+		})
+
+		It("uses the RTT from RTT stats", func() {
+			rtt := 2 * time.Second
+			updateRTT(rtt)
+			Expect(handler.computeTLPTimeout()).To(Equal(rtt * 3 / 2))
+		})
+
+		It("uses the minTLPTimeout for short RTTs", func() {
+			rtt := 2 * time.Microsecond
+			updateRTT(rtt)
+			Expect(handler.computeTLPTimeout()).To(Equal(minTPLTimeout))
+		})
+
+		It("sets the TLP send mode until one retransmittable packet is sent", func() {
+
+		})
+	})
+
+	PContext("RTOs", func() {
 		It("uses default RTO", func() {
 			Expect(handler.computeRTOTimeout()).To(Equal(defaultRTOTimeout))
 		})
 
-		It("uses RTO from rttStats", func() {
-			rtt := time.Second
-			expected := rtt + rtt/2*4
-			handler.rttStats.UpdateRTT(rtt, 0, time.Now())
-			Expect(handler.computeRTOTimeout()).To(Equal(expected))
+		It("uses RTO from RTT stats", func() {
+			rtt := 2 * time.Second
+			updateRTT(rtt)
+			Expect(handler.computeRTOTimeout()).To(Equal(rtt + rtt/2*4))
 		})
 
 		It("limits RTO min", func() {
-			rtt := time.Millisecond
-			handler.rttStats.UpdateRTT(rtt, 0, time.Now())
+			rtt := 3 * time.Millisecond
+			updateRTT(rtt)
 			Expect(handler.computeRTOTimeout()).To(Equal(minRTOTimeout))
 		})
 
 		It("limits RTO max", func() {
-			rtt := time.Hour
-			handler.rttStats.UpdateRTT(rtt, 0, time.Now())
+			updateRTT(time.Hour)
 			Expect(handler.computeRTOTimeout()).To(Equal(maxRTOTimeout))
 		})
 
@@ -736,7 +761,7 @@ var _ = Describe("SentPacketHandler", func() {
 			handler.SentPacket(retransmittablePacket(&Packet{PacketNumber: 1}))
 			handler.SentPacket(retransmittablePacket(&Packet{PacketNumber: 2}))
 
-			handler.rttStats.UpdateRTT(time.Hour, 0, time.Now())
+			updateRTT(time.Hour)
 			Expect(handler.lossTime.IsZero()).To(BeTrue())
 			Expect(time.Until(handler.GetAlarmTimeout())).To(BeNumerically("~", handler.computeRTOTimeout(), time.Minute))
 

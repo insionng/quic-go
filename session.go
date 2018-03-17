@@ -866,6 +866,16 @@ sendLoop:
 				}
 			}
 			numPacketsSent++
+		case ackhandler.SendTLP:
+			s.queueControlFrame(&wire.PingFrame{})
+			sentPacket, err := s.sendPacket()
+			if err != nil {
+				return err
+			}
+			if !sentPacket {
+				return errors.New("session BUG: expected a packet to be sent in TLP mode")
+			}
+			return nil
 		case ackhandler.SendRetransmission:
 			sentPacket, err := s.maybeSendRetransmission()
 			if err != nil {
